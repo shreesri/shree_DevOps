@@ -1,0 +1,126 @@
+Jenkins - Docker slave configuration 
+
+Step 1. Need to configure the Docker API
+
+Append the following line in end of /etc/sysconfig/docker file
+
+DOCKER_OPTS="-H tcp://0.0.0.0:2375 -H unix://var/run/docker.sock" >> /etc/sysconfig/docker
+
+2. then insert the $Docker_OPTS inside the /usr/lib/systemd/system/docker.service file under the [Service] catagory at the end like below 
+for example:
+
+[Service]
+Type=notify
+NotifyAccess=all
+EnvironmentFile=-/run/containers/registries.conf
+EnvironmentFile=-/etc/sysconfig/docker
+EnvironmentFile=-/etc/sysconfig/docker-storage
+EnvironmentFile=-/etc/sysconfig/docker-network
+Environment=GOTRACEBACK=crash
+Environment=DOCKER_HTTP_HOST_COMPAT=1
+Environment=PATH=/usr/libexec/docker:/usr/bin:/usr/sbin
+ExecStart=/usr/bin/dockerd-current \
+          --add-runtime docker-runc=/usr/libexec/docker/docker-runc-current \
+          --default-runtime=docker-runc \
+          --exec-opt native.cgroupdriver=systemd \
+          --userland-proxy-path=/usr/libexec/docker/docker-proxy-current \
+          $OPTIONS \
+          $DOCKER_STORAGE_OPTIONS \
+          $DOCKER_NETWORK_OPTIONS \
+          $ADD_REGISTRY \
+          $BLOCK_REGISTRY \
+          $INSECURE_REGISTRY\
+          $REGISTRIES \
+          $DOCKER_OPTS
+		  
+3. Then reload the systemctl deamon and restart the docker service. using following commands
+
+systemctl daemon-reload
+systemctl restart docker 
+
+3. Then validate using following link in browser		  
+
+http://172.16.1.53:2375/version
+
+4. once you configure the Docker api, current docker-proxy path will be over written. so, we are unable to launch the docker containers. To over come this situation we have to follow the below steps
+
+To route the  proxy run following two commands.
+
+ln -s /usr/libexec/docker/docker-proxy-current /usr/bin/docker-proxy
+ln -s /usr/libexec/docker/docker-runc-current /usr/libexec/docker/docker-runc
+
+5. Then build the dockerfile like below.
+#=============================================================================
+FROM centos:7
+MAINTAINER Maxfield Stewart
+
+# Install Essentials
+RUN yum update -y && \
+         yum clean all
+
+# Install Packages
+RUN yum install -y git && \
+         yum install -y wget && \
+         yum install -y openssh-server && \
+         yum install -y java-1.8.0-openjdk && \
+         yum install -y sudo && \
+         yum install -y maven && \
+         yum clean all
+
+# gen dummy keys, centos doesn't autogen them like ubuntu does
+RUN /usr/bin/ssh-keygen -A
+
+# Set SSH Configuration to allow remote logins without /proc write access
+RUN sed -ri 's/^session\s+required\s+pam_loginuid.so$/session optional pam_loginuid.so/' /etc/pam.d/sshd
+RUN sed -i 's/#PermitRootLogin yes/PermitRootLogin yes/g' /etc/ssh/sshd_config
+
+# Create Jenkins User
+RUN useradd jenkins -m -s /bin/bash
+
+# Set password for the jenkins user (you may want to alter this).
+RUN echo "jenkins:jenkins" | chpasswd
+RUN echo "root:root" | chpasswd
+
+# Add the jenkins user to sudoers
+RUN echo "jenkins  ALL=(ALL)  NOPASSWD: ALL" >> etc/sudoers
+
+# JAVA Home path setting
+RUN echo "JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.161-0.b14.el7_4.x86_64/jre" >> /root/.bashrc
+RUN echo "PATH=$JAVA_HOME/bin:$PATH" >> /root/.bashrc
+RUN echo "JAVA_HOME=/usr/lib/jvm/java-1.8.0-openjdk-1.8.0.161-0.b14.el7_4.x86_64/jre" >> /home/jenkins/.bashrc
+RUN echo "PATH=$JAVA_HOME/bin:$PATH" >> /home/jenkins/.bashrc
+
+# Expose SSH port and run SSHD
+EXPOSE 22
+CMD ["/usr/sbin/sshd","-D"]
+
+#====================================================================================================================
+
+then go to the jenkins and 
+step 1: Manage Jenkins --> Configure System --> go to bottom of the page then follow below instructions.
+
+select cloud name as docker	
+provide the Docker Host URI and test it.
+
+Docker Host URI	tcp://172.16.1.53:2375 
+
+step 2: clieck on the Docker Agent templates
+
+i) provide the lable name : job_run
+ii) Docker Image: image of the docker which we build from the dockerfile
+iii) click on the Container settings
+iv) provide volumes
+ex: /var/run/docker.sock:/var/run/docker.sock
+    /shree/jobs:/home/jenkins
+v) Remote Filing System Root: /shree/jobs
+vi) Connect method : Connect with ssh
+vii) ssh key: Use configured SSH credentials
+     ssh credentials:username: root , password: root
+	 Host Key Verification Strategy: Non verifying Verification Strategy
+viii) then click on Advanced: 
+      port: 22
+ix) Pull strategy: Never pull
+
+x) click on apply and save.
+
+
