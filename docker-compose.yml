@@ -1,0 +1,30 @@
+version: '2'
+
+services:
+
+    prometheus:
+        image: prom/prometheus
+        privileged: true
+        volumes:
+            - /root/prometheus.yml:/etc/prometheus/prometheus.yml
+            - /root/alert.rules:/alert.rules
+        command:
+            -'-config.file=/etc/prometheus/prometheus.yml'
+            -'-alertmanager.url=http://172.16.1.79:9093'
+        ports:
+            - '9090:9090'
+
+    node-exporter:
+        image: prom/node-exporter
+        ports:
+            - '9100:9100'
+
+    alertmanager:
+        image: prom/alertmanager
+        privileged: true
+        volumes:
+            - /root/alertmanager.yml:/etc/alertmanager/config.yml
+        command:
+            -'-config.file=/etc/alertmanager/config.yml'
+        ports:
+            - '9093:9093'
